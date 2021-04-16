@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <cuda_runtime.h>
+#include <omp.h>
 #include <stdio.h>
 #include <iostream>
 #include <vector>
@@ -18,6 +19,8 @@ int main(int argc, char** argv)
     std::vector<int> gpu_ids{0, 0, 0};
     // std::vector<int> gpu_ids{0, 1, 2};
 
+    std::vector<int> values{11, 22, 33};
+
     std::vector<int*>            d_buf(gpu_ids.size());
     std::vector<int>             h_buf(2 * gpu_ids.size());
     std::vector<cudaStream_t>    streams(gpu_ids.size());
@@ -29,9 +32,12 @@ int main(int argc, char** argv)
 
     for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
-        CUDA_ERROR(cudaMalloc((void**)gpu_ids[i], sizeof(int)));
+        int* buf = NULL;
+        CUDA_ERROR(cudaMalloc((void**)&buf, sizeof(int)));
+        d_buf[i] = buf;
         CUDA_ERROR(cudaGraphCreate(&graphs[i], 0));
         CUDA_ERROR(cudaStreamCreate(&streams[i]));
+        CUDA_ERROR(cudaEventCreate(&events[i]));
     }
 
 
@@ -41,7 +47,7 @@ int main(int argc, char** argv)
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
 
         // 1st
-        void*                kernelArgs[2] = {&d_buf[i], &gpu_ids[i]};
+        void*                kernelArgs[2] = {&d_buf[i], &values[i]};
         cudaKernelNodeParams kernelNodeParams = {0};
         kernelNodeParams.func = (void*)write_id;
         kernelNodeParams.gridDim = dim3(1, 1, 1);
@@ -54,7 +60,6 @@ int main(int argc, char** argv)
                                           &kernelNodeParams));
 
         // 2nd
-        CUDA_ERROR(cudaEventCreate(&events[i]));
         CUDA_ERROR(cudaGraphAddEventRecordNode(&event_nodes[i], graphs[i],
                                                &kernel_nodes[i], 1, events[i]));
     }
@@ -97,9 +102,9 @@ int main(int argc, char** argv)
         bool trucatedErrorMessage = (pLogBuffer[bufferSize - 1] == '\0');
         pLogBuffer[bufferSize - 1] = '\0';
         if (res != cudaSuccess) {
-            std::cout << "\n\t Error: " << cudaGetErrorString(res);
-            std::cout << "\n\t Error: " << pLogBuffer;
-            std::cout << "\n\t Error: Related Graph Node ->"
+            std::cout << "\n Error: " << cudaGetErrorString(res);
+            std::cout << "\n Error: " << pLogBuffer;
+            std::cout << "\n Error: Related Graph Node ->"
                       << reinterpret_cast<char*>(pErrorNode);
             if (trucatedErrorMessage) {
                 std::cout << "\n Error: previous error message was truncated";
@@ -108,23 +113,40 @@ int main(int argc, char** argv)
     }
 
 
-    // launch the graphs
+// launch the graphs
+#pragma omp parallel for num_threads(gpu_ids.size())
     for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaGraphLaunch(exec_graphs[i], streams[i]));
+        CUDA_ERROR(cudaStreamSynchronize(streams[i]));
     }
 
 
-    // sync and check the output
+    // check the output
     for (int i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
         CUDA_ERROR(cudaDeviceSynchronize());
+    }
 
+
+    // copy the ground truth to host
+    std::vector<int> truth(gpu_ids.size());
+    for (int i = 0; i < gpu_ids.size(); ++i) {
+        CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
+        CUDA_ERROR(cudaMemcpy(&truth[i], d_buf[i], sizeof(int),
+                              cudaMemcpyDeviceToHost));
+    }
+
+    // sync and check the output
+    for (int i = 0; i < gpu_ids.size(); ++i) {
         int i_next = (i + 1) % gpu_ids.size();
         int i_prev = (i == 0) ? gpu_ids.size() - 1 : i - 1;
 
         printf("\n*** ID = %d\n", i);
-        printf("\n i_next = %d, buf= %d", i_next, h_buf[2 * i]);
-        printf("\n i_prev = %d, buf= %d\n", i_prev, h_buf[2 * i + 1]);
+        printf("\n i_next = %d, val= %d, truth= %d, buf= %d", i_next,
+               values[i_next], truth[i_next], h_buf[2 * i]);
+
+        printf("\n i_prev = %d, val= %d, truth= %d, buf= %d\n", i_prev,
+               values[i_prev], truth[i_prev], h_buf[2 * i + 1]);
     }
 
 
