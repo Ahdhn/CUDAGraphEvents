@@ -115,7 +115,8 @@ int main(int argc, char** argv)
 
 // launch the graphs
 #pragma omp parallel for num_threads(gpu_ids.size())
-    for (size_t i = 0; i < gpu_ids.size(); ++i) {
+    for (int i = 0; i < gpu_ids.size(); ++i) {
+        // for (int i = gpu_ids.size() - 1; i >= 0; --i) {
         CUDA_ERROR(cudaGraphLaunch(exec_graphs[i], streams[i]));
         CUDA_ERROR(cudaStreamSynchronize(streams[i]));
     }
@@ -141,7 +142,7 @@ int main(int argc, char** argv)
         int i_next = (i + 1) % gpu_ids.size();
         int i_prev = (i == 0) ? gpu_ids.size() - 1 : i - 1;
 
-        printf("\n*** ID = %d\n", i);
+        printf("\n*** ID = %d", i);
         printf("\n i_next = %d, val= %d, truth= %d, buf= %d", i_next,
                values[i_next], truth[i_next], h_buf[2 * i]);
 
