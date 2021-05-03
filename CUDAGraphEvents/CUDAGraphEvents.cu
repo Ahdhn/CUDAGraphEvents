@@ -7,10 +7,10 @@
 #include "helper.h"
 
 
-__global__ static void write_id(int* mem, int id)
+__global__ static void write_value(int* mem, int value)
 {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        mem[0] = id;
+        mem[0] = value;
     }
 }
 
@@ -22,7 +22,7 @@ int main(int argc, char** argv)
     std::vector<int> values{11, 22, 33};
 
     std::vector<int*>            d_buf(gpu_ids.size());
-    std::vector<int>             h_buf(2 * gpu_ids.size());
+    std::vector<int>             h_result(2 * gpu_ids.size(), 99);
     std::vector<cudaStream_t>    streams(gpu_ids.size());
     std::vector<cudaGraph_t>     graphs(gpu_ids.size());
     std::vector<cudaGraphExec_t> exec_graphs(gpu_ids.size());
@@ -30,6 +30,7 @@ int main(int argc, char** argv)
     std::vector<cudaGraphNode_t> event_nodes(gpu_ids.size());
     std::vector<cudaEvent_t>     events(gpu_ids.size());
 
+    // allocate device buffer and create graph, streams, and events
     for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
         int* buf = NULL;
@@ -40,6 +41,12 @@ int main(int argc, char** argv)
         CUDA_ERROR(cudaEventCreate(&events[i]));
     }
 
+    // initialize the device buffer with something
+    for (int i = 0; i < gpu_ids.size(); ++i) {
+        CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
+        CUDA_ERROR(cudaMemcpy(d_buf[i], &h_result[i], sizeof(int),
+                              cudaMemcpyHostToDevice));
+    }
 
     // 1st node is to write the GPU id to d_buf
     // 2nd node is a record event after the 1st node
@@ -49,7 +56,7 @@ int main(int argc, char** argv)
         // 1st
         void*                kernelArgs[2] = {&d_buf[i], &values[i]};
         cudaKernelNodeParams kernelNodeParams = {0};
-        kernelNodeParams.func = (void*)write_id;
+        kernelNodeParams.func = (void*)write_value;
         kernelNodeParams.gridDim = dim3(1, 1, 1);
         kernelNodeParams.blockDim = dim3(1, 1, 1);
         kernelNodeParams.sharedMemBytes = 0;
@@ -72,7 +79,7 @@ int main(int argc, char** argv)
         std::vector<cudaGraphNode_t> wait_nodes(2);
 
         size_t i_next = (i + 1) % gpu_ids.size();
-        size_t i_prev = (i == 0) ? gpu_ids.size() - 1 : i - 1;
+        size_t i_prev = (i + gpu_ids.size() - 1) % gpu_ids.size();
 
         // 3rd
         CUDA_ERROR(cudaGraphAddEventWaitNode(
@@ -85,15 +92,16 @@ int main(int argc, char** argv)
         cudaGraphNode_t n_next, n_prev;
         CUDA_ERROR(cudaGraphAddMemcpyNode1D(
             &n_next, graphs[i], wait_nodes.data(), wait_nodes.size(),
-            &h_buf[i * 2], d_buf[i_next], sizeof(int), cudaMemcpyDeviceToHost));
+            &h_result[i * 2], d_buf[i_next], sizeof(int),
+            cudaMemcpyDeviceToHost));
 
         CUDA_ERROR(cudaGraphAddMemcpyNode1D(
             &n_prev, graphs[i], wait_nodes.data(), wait_nodes.size(),
-            &h_buf[i * 2 + 1], d_buf[i_prev], sizeof(int),
+            &h_result[i * 2 + 1], d_buf[i_prev], sizeof(int),
             cudaMemcpyDeviceToHost));
 
 
-        // make the graph executable
+        // make the graph executable and check for errors
         cudaGraphNode_t pErrorNode = nullptr;
         const size_t    bufferSize = 1024;
         char            pLogBuffer[bufferSize];
@@ -116,20 +124,12 @@ int main(int argc, char** argv)
 // launch the graphs
 #pragma omp parallel for num_threads(gpu_ids.size())
     for (int i = 0; i < gpu_ids.size(); ++i) {
-        // for (int i = gpu_ids.size() - 1; i >= 0; --i) {
         CUDA_ERROR(cudaGraphLaunch(exec_graphs[i], streams[i]));
         CUDA_ERROR(cudaStreamSynchronize(streams[i]));
     }
 
 
-    // check the output
-    for (int i = 0; i < gpu_ids.size(); ++i) {
-        CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
-        CUDA_ERROR(cudaDeviceSynchronize());
-    }
-
-
-    // copy the ground truth to host
+    // copy the ground truth (values written to the device buffer) to the host
     std::vector<int> truth(gpu_ids.size());
     for (int i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
@@ -143,11 +143,15 @@ int main(int argc, char** argv)
         int i_prev = (i == 0) ? gpu_ids.size() - 1 : i - 1;
 
         printf("\n*** ID = %d", i);
-        printf("\n i_next = %d, val= %d, truth= %d, buf= %d", i_next,
-               values[i_next], truth[i_next], h_buf[2 * i]);
+        printf(
+            "\n i_next = %d, correct_value= %d, value_from_device= %d, "
+            "h_result= %d",
+            i_next, values[i_next], truth[i_next], h_result[2 * i]);
 
-        printf("\n i_prev = %d, val= %d, truth= %d, buf= %d\n", i_prev,
-               values[i_prev], truth[i_prev], h_buf[2 * i + 1]);
+        printf(
+            "\n i_prev = %d, correct_value= %d, value_from_device= %d, "
+            "h_result= %d\n",
+            i_prev, values[i_prev], truth[i_prev], h_result[2 * i + 1]);
     }
 
 
