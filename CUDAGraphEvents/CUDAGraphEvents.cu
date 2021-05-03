@@ -16,8 +16,8 @@ __global__ static void write_value(int* mem, int value)
 
 int main(int argc, char** argv)
 {
-    std::vector<int> gpu_ids{0, 0, 0};
-    // std::vector<int> gpu_ids{0, 1, 2};
+    // std::vector<int> gpu_ids{0, 0, 0};
+    std::vector<int> gpu_ids{0, 1, 2};
 
     std::vector<int> values{11, 22, 33};
 
@@ -42,7 +42,7 @@ int main(int argc, char** argv)
     }
 
     // initialize the device buffer with something
-    for (int i = 0; i < gpu_ids.size(); ++i) {
+    for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
         CUDA_ERROR(cudaMemcpy(d_buf[i], &h_result[i], sizeof(int),
                               cudaMemcpyHostToDevice));
@@ -123,7 +123,7 @@ int main(int argc, char** argv)
 
 // launch the graphs
 #pragma omp parallel for num_threads(gpu_ids.size())
-    for (int i = 0; i < gpu_ids.size(); ++i) {
+    for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaGraphLaunch(exec_graphs[i], streams[i]));
         CUDA_ERROR(cudaStreamSynchronize(streams[i]));
     }
@@ -131,14 +131,14 @@ int main(int argc, char** argv)
 
     // copy the ground truth (values written to the device buffer) to the host
     std::vector<int> truth(gpu_ids.size());
-    for (int i = 0; i < gpu_ids.size(); ++i) {
+    for (size_t i = 0; i < gpu_ids.size(); ++i) {
         CUDA_ERROR(cudaSetDevice(gpu_ids[i]));
         CUDA_ERROR(cudaMemcpy(&truth[i], d_buf[i], sizeof(int),
                               cudaMemcpyDeviceToHost));
     }
 
     // sync and check the output
-    for (int i = 0; i < gpu_ids.size(); ++i) {
+    for (int i = 0; i < int(gpu_ids.size()); ++i) {
         int i_next = (i + 1) % gpu_ids.size();
         int i_prev = (i == 0) ? gpu_ids.size() - 1 : i - 1;
 
