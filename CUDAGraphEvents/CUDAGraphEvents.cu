@@ -16,8 +16,21 @@ __global__ static void write_value(int* mem, int value)
 
 int main(int argc, char** argv)
 {
-    // std::vector<int> gpu_ids{0, 0, 0};
-    std::vector<int> gpu_ids{0, 1, 2};
+    //Set gpu ids based on the device count
+    std::vector<int> gpu_ids(3);
+    int num_devices = 0;
+    CUDA_ERROR(cudaGetDeviceCount(&num_devices));    
+    if(num_devices>=3){        
+        gpu_ids[0] = 0;
+        gpu_ids[1] = 1;
+        gpu_ids[2] = 2;
+    }else{
+        gpu_ids[0] = 0;
+        gpu_ids[1] = 0;
+        gpu_ids[2] = 0;
+    }
+    
+    
 
     std::vector<int> values{11, 22, 33};
 
