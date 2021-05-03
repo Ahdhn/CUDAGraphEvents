@@ -1,12 +1,10 @@
-# CUDATemplate
-My template for starting a new CUDA project using CMake on Windows (Visual Studio) or Linux (gcc, clang).
-
+# CUDAGraphEvents
+Exploring the event record/wait nodes in CUDA Graph to synchronize between multiple CUDA Graph on multi-GPUs.
 
 ## Build 
-You might first need to change the project name in the `CMakeLists.txt` and the folder name. Then simply run 
-
 ```
 mkdir build
 cd build 
 cmake ..
 ```
+
